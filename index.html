@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conto — Expense Tracker</title>
+<style>
+:root{color-scheme:light;--ink:#17251f;--muted:#53635a;--paper:#f6f7f2;--line:#dce3da;--green:#1f553e;--lime:#dbf49b}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
+header{background:#193c30;color:white}nav,main{width:min(1060px,calc(100% - 36px));margin:auto}
+nav{display:flex;justify-content:space-between;align-items:center;padding:19px 0}nav strong{font-size:23px;letter-spacing:-1px}nav span{color:#e1ebdc}
+main{padding:34px 0 62px}.intro,.section-head,.movement,.bar-label{display:flex;justify-content:space-between;align-items:center;gap:14px}
+h1,h2,p{margin:0}h1{font-size:clamp(34px,6vw,51px);letter-spacing:-.06em;line-height:1.08}h2{font-size:20px;letter-spacing:-.025em}.intro p{color:var(--muted);margin-top:8px}
+label{display:block;font-weight:650;font-size:13px}input,select,button{font:inherit}input,select{display:block;width:100%;min-height:42px;padding:8px 10px;border:1px solid #bac8bc;border-radius:8px;background:white;color:var(--ink);margin-top:5px}
+button{cursor:pointer;border:0;border-radius:8px;padding:10px 13px;font-weight:700;background:var(--green);color:white}button:hover{filter:brightness(1.18)}:focus-visible{outline:3px solid #578141;outline-offset:3px}
+.stats{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:14px;margin:24px 0}.card{background:white;border:1px solid var(--line);border-radius:16px;padding:20px;min-width:0}.primary{background:var(--lime);border-color:var(--lime)}
+.metric{display:block;margin-top:6px;font-size:clamp(22px,3.8vw,36px);letter-spacing:-.045em;line-height:1.18;overflow-wrap:anywhere}.stats span,.empty,.meta,.hint{color:var(--muted)}.primary span{color:#38502f}
+.layout{display:grid;grid-template-columns:1fr 1.65fr;align-items:start;gap:16px}.stack{display:grid;gap:16px}form{display:grid;gap:13px;margin-top:15px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.secondary,.actions button{color:var(--green);background:#edf3eb}.actions{display:flex;gap:5px}.actions button{font-size:12px;padding:6px 8px}.movement{border-top:1px solid var(--line);padding:12px 0;flex-wrap:wrap}.movement>div:first-child{flex:1;min-width:120px;overflow-wrap:anywhere}.movement:last-child{padding-bottom:0}.meta,.hint{font-size:13px}.empty{padding-top:15px}.filters{margin:12px 0}.bars{display:grid;gap:12px;margin-top:12px}progress{display:block;width:100%;height:10px;accent-color:var(--green)}.bar-label{font-size:13px;margin-bottom:3px}#form-message:empty,#status:empty{display:none}#status{margin-bottom:12px;color:#842519}
+@media(max-width:710px){.layout{grid-template-columns:1fr}.stats{grid-template-columns:1fr 1fr}.primary{grid-column:1/-1}.intro{align-items:start;flex-direction:column}}
+</style>
+</head>
+<body>
+<header><nav><strong>Conto.</strong><span>Expense tracker</span></nav></header>
+<main>
+  <noscript><p>Per registrare le spese, scarica questo file HTML e aprilo in Chrome, Safari o Firefox con JavaScript attivo.</p></noscript>
+  <div class="intro">
+    <div><h1>Le tue spese</h1><p>Registra le uscite e scopri dove spendi ogni mese.</p></div>
+    <label>Mese di riferimento<input id="month" type="month" required></label>
+  </div>
+  <div class="stats" aria-live="polite">
+    <div class="card primary"><span>Totale speso</span><strong class="metric" id="total"></strong></div>
+    <div class="card"><span>Movimenti</span><strong class="metric" id="count"></strong></div>
+    <div class="card"><span>Spesa media</span><strong class="metric" id="average"></strong></div>
+  </div>
+  <p id="status" role="status"></p>
+  <div class="layout">
+    <div class="stack">
+      <section class="card">
+        <h2 id="form-title">Nuova spesa</h2>
+        <form id="expense-form" novalidate>
+          <label>Descrizione<input id="description" placeholder="Es. Spesa al supermercato" maxlength="100" required></label>
+          <div class="fields">
+            <label>Importo (€)<input id="amount" type="text" inputmode="decimal" placeholder="0,00" required></label>
+            <label>Data<input id="date" type="date" required></label>
+          </div>
+          <label>Categoria<select id="category" required></select></label>
+          <p id="form-message" class="hint" role="status"></p>
+          <button type="submit" id="save-expense">Aggiungi spesa</button>
+          <button type="button" id="cancel" class="secondary" hidden>Annulla modifica</button>
+        </form>
+      </section>
+      <section class="card"><h2>Spese per categoria</h2><div id="bars"></div></section>
+    </div>
+    <section class="card">
+      <h2>Movimenti</h2>
+      <label class="filters">Filtra per categoria<select id="filter"><option value="">Tutte le categorie</option></select></label>
+      <div id="movements"></div>
+    </section>
+  </div>
+  <p class="hint" style="margin-top:16px">Le spese vengono salvate in questo browser.</p>
+</main>
+<script>
+(() => {
+'use strict';
+const storageKey = 'conto-expenses-v1';
+const categories = ['Alimentari', 'Casa', 'Trasporti', 'Tempo libero', 'Salute', 'Shopping', 'Altro'];
+const get = id => document.getElementById(id);
+const form = get('expense-form');
+const month = get('month');
+const date = get('date');
+const category = get('category');
+const filter = get('filter');
+const amount = get('amount');
+const description = get('description');
+const storageStatus = get('status');
+const formMessage = get('form-message');
+const currency = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' });
+const dateFormat = new Intl.DateTimeFormat('it-IT', { dateStyle: 'medium' });
+let editingId = null;
+let expenses = [];
+let storageReadable = true;
+
+function localToday() {
+  const now = new Date();
+  return [now.getFullYear(), now.getMonth() + 1, now.getDate()]
+    .map(value => String(value).padStart(2, '0')).join('-');
+}
+
+function element(tag, value, className) {
+  const node = document.createElement(tag);
+  node.textContent = value;
+  if (className) node.className = className;
+  return node;
+}
+
+function loadExpenses() {
+  const saved = JSON.parse(localStorage.getItem(storageKey) ?? '[]');
+  if (!Array.isArray(saved)) throw new Error('Archivio non valido');
+  return saved;
+}
+
+function saveExpenses(next) {
+  try {
+    if (storageReadable) {
+      try { localStorage.setItem(storageKey, JSON.stringify(next)); }
+      catch { storageReadable = false; }
+    }
+    expenses = next;
+    storageStatus.textContent = storageReadable ? '' : 'Modalità temporanea: le spese funzionano ma non saranno conservate dopo la chiusura della pagina.';
+    return true;
+  } catch {
+    storageStatus.textContent = 'Impossibile salvare le spese. Controlla che il browser consenta il salvataggio locale.';
+    return false;
+  }
+}
+
+function resetForm() {
+  editingId = null;
+  form.reset();
+  formMessage.textContent = '';
+  const today = localToday();
+  date.value = month.value === today.slice(0, 7) ? today : month.value + '-01';
+  get('form-title').textContent = 'Nuova spesa';
+  get('save-expense').textContent = 'Aggiungi spesa';
+  get('cancel').hidden = true;
+}
+
+function edit(expense) {
+  editingId = expense.id;
+  formMessage.textContent = '';
+  description.value = expense.description;
+  amount.value = (expense.cents / 100).toFixed(2).replace('.', ',');
+  date.value = expense.date;
+  category.value = expense.category;
+  get('form-title').textContent = 'Modifica spesa';
+  get('save-expense').textContent = 'Salva modifica';
+  get('cancel').hidden = false;
+  description.focus();
+}
+
+function showMovement(expense) {
+  const row = element('div', '', 'movement');
+  const details = document.createElement('div');
+  const formattedDate = dateFormat.format(new Date(expense.date + 'T12:00:00'));
+  details.append(element('strong', expense.description), element('div', expense.category + ' · ' + formattedDate, 'meta'));
+  const actions = element('div', '', 'actions');
+  const editButton = element('button', 'Modifica');
+  const deleteButton = element('button', 'Elimina');
+  editButton.setAttribute('aria-label', 'Modifica ' + expense.description);
+  deleteButton.setAttribute('aria-label', 'Elimina ' + expense.description);
+  editButton.onclick = () => edit(expense);
+  deleteButton.onclick = () => {
+    if (confirm('Eliminare la spesa «' + expense.description + '»?') &&
+        saveExpenses(expenses.filter(item => item.id !== expense.id))) {
+      if (editingId === expense.id) resetForm();
+      render();
+    }
+  };
+  actions.append(editButton, deleteButton);
+  row.append(details, element('strong', currency.format(expense.cents / 100)), actions);
+  return row;
+}
+
+function render() {
+  const monthly = expenses.filter(expense => expense.date.slice(0, 7) === month.value);
+  const total = monthly.reduce((sum, expense) => sum + expense.cents, 0);
+  get('total').textContent = currency.format(total / 100);
+  get('count').textContent = monthly.length;
+  get('average').textContent = currency.format(monthly.length ? total / monthly.length / 100 : 0);
+
+  const displayed = monthly.filter(expense => !filter.value || expense.category === filter.value)
+    .sort((first, second) => second.date.localeCompare(first.date));
+  const movements = get('movements');
+  movements.replaceChildren(...displayed.map(showMovement));
+  if (!displayed.length) movements.append(element('p', filter.value ? 'Nessuna spesa in questa categoria.' : 'Nessuna spesa registrata per questo mese.', 'empty'));
+
+  const bars = get('bars');
+  bars.replaceChildren();
+  if (!total) {
+    bars.append(element('p', 'Le categorie appariranno dopo la prima spesa del mese.', 'empty'));
+    return;
+  }
+  const sums = new Map();
+  for (const expense of monthly) sums.set(expense.category, (sums.get(expense.category) ?? 0) + expense.cents);
+  const list = element('div', '', 'bars');
+  for (const [name, cents] of [...sums].sort((first, second) => second[1] - first[1])) {
+    const row = document.createElement('div');
+    const label = element('div', '', 'bar-label');
+    label.append(element('span', name), element('strong', currency.format(cents / 100)));
+    const bar = document.createElement('progress');
+    bar.max = total;
+    bar.value = cents;
+    bar.setAttribute('aria-label', 'Quota mensile per ' + name);
+    row.append(label, bar);
+    list.append(row);
+  }
+  bars.append(list);
+}
+
+for (const name of categories) {
+  category.add(new Option(name, name));
+  filter.add(new Option(name, name));
+}
+month.value = localToday().slice(0, 7);
+resetForm();
+try {
+  expenses = loadExpenses();
+} catch {
+  storageReadable = false;
+  storageStatus.textContent = 'Modalità temporanea: il browser non permette di leggere le spese salvate.';
+}
+render();
+
+month.addEventListener('change', () => {
+  if (!month.value) month.value = localToday().slice(0, 7);
+  if (!editingId) date.value = month.value === localToday().slice(0, 7) ? localToday() : month.value + '-01';
+  render();
+});
+filter.addEventListener('change', render);
+get('cancel').addEventListener('click', resetForm);
+form.addEventListener('input', () => { formMessage.textContent = ''; });
+form.addEventListener('submit', event => {
+  event.preventDefault();
+  const name = description.value.trim();
+  const enteredAmount = amount.value.trim();
+  const validAmount = /^[0-9]{1,7}(?:[,.][0-9]{1,2})?$/.test(enteredAmount) &&
+    Number(enteredAmount.replace(',', '.')) > 0;
+  const invalidField = [
+    [description, name, 'Inserisci una descrizione.'],
+    [amount, validAmount, 'Inserisci un importo maggiore di zero, per esempio 12,50.'],
+    [date, date.validity.valid, 'Inserisci una data valida.'],
+    [category, category.value, 'Seleziona una categoria.']
+  ].find(([, valid]) => !valid);
+  if (invalidField) {
+    const [field, , message] = invalidField;
+    formMessage.textContent = message;
+    field.focus();
+    return;
+  }
+  const cents = Math.round(Number(enteredAmount.replace(',', '.')) * 100);
+  const successMessage = editingId ? 'Modifica salvata.' : 'Spesa aggiunta.';
+  const expense = {
+    id: editingId ?? globalThis.crypto?.randomUUID?.() ?? Date.now() + '-' + Math.random(),
+    description: name, cents, date: date.value, category: category.value
+  };
+  const next = editingId ? expenses.map(item => item.id === editingId ? expense : item) : [...expenses, expense];
+  if (!saveExpenses(next)) return;
+  month.value = expense.date.slice(0, 7);
+  if (filter.value && filter.value !== expense.category) filter.value = '';
+  resetForm();
+  render();
+  formMessage.textContent = successMessage;
+  description.focus();
+});
+})();
+</script>
+</body>
+</html>
